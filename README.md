@@ -1,5 +1,7 @@
 # body
 
+[![CI](https://github.com/alanhoyle/body/actions/workflows/ci.yml/badge.svg)](https://github.com/alanhoyle/body/actions/workflows/ci.yml)
+
 Prints the header line(s) from piped STDIN untouched, then hands the
 remaining "body" of the input to another command (`sort` by default) for
 further processing. Handy for `sort`/`grep`/etc. when you want to keep a
