@@ -1,0 +1,13 @@
+[package]
+name = "body"
+version = "0.1.0"
+edition = "2021"
+description = "Print header line(s) from STDIN untouched, then pipe the rest to another command."
+
+[[bin]]
+name = "body"
+path = "src/main.rs"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
