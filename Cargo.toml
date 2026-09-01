@@ -1,6 +1,6 @@
 [package]
 name = "body"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Print header line(s) from STDIN untouched, then pipe the rest to another command."
 
