@@ -32,8 +32,13 @@ body() {
     local HEADER_LINES=1
     local DEFAULT_COMMAND="${BODY_DEFAULT_COMMAND:-sort}"
 
-    if [[ -t 0 || "$1" == "-h" || "$1" == "--help" ]]; then
-        if [ -t 0 ]; then
+    local help_requested=0
+    if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+        help_requested=1
+    fi
+
+    if [[ -t 0 || $help_requested -eq 1 ]]; then
+        if [ -t 0 ] && [ $help_requested -eq 0 ]; then
             echo "ERROR:  body requires piped input!" >&2
             echo "" >&2
         fi
@@ -55,7 +60,7 @@ body() {
         echo "    Pass through with no header at all:" >&2
         echo "        cat file_with_no_header.txt | body 0 sort" >&2
 
-        if [ -t 0 ]; then
+        if [ -t 0 ] && [ $help_requested -eq 0 ]; then
             return 1
         else
             return 0

@@ -93,12 +93,12 @@ fn main() -> ExitCode {
     let first_is_help = matches!(args.first().map(String::as_str), Some("-h" | "--help"));
 
     if stdin_is_tty || first_is_help {
-        if stdin_is_tty {
+        if stdin_is_tty && !first_is_help {
             eprintln!("ERROR:  body requires piped input!");
             eprintln!();
         }
         print_help(&default_command());
-        return if stdin_is_tty {
+        return if stdin_is_tty && !first_is_help {
             ExitCode::FAILURE
         } else {
             ExitCode::SUCCESS
