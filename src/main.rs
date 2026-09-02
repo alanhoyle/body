@@ -15,6 +15,17 @@
 //! needs. To avoid that, header lines are read one byte at a time directly
 //! from file descriptor 0 via an unbuffered `File`, mirroring how bash's
 //! `read` builtin avoids over-consuming a pipe.
+//!
+//! Unix only: this relies on wrapping the raw file descriptor 0
+//! (`std::os::unix::io::FromRawFd`) and on reading a child's exit signal
+//! (`std::os::unix::process::ExitStatusExt`), neither of which exists on
+//! Windows.
+
+#[cfg(not(unix))]
+compile_error!(
+    "body only supports Unix-like platforms (Linux, macOS, BSD, ...) -- it relies on \
+     std::os::unix for raw file descriptor access and process signal exit status"
+);
 
 use std::env;
 use std::fs::File;
@@ -30,9 +41,13 @@ const DEFAULT_HEADER_LINES: usize = 1;
 /// Default command to hand the body to when none is given on the command
 /// line. Overridable via the `BODY_DEFAULT_COMMAND` environment variable,
 /// falling back to `sort` if unset or empty (matching bash's `${VAR:-default}`).
+/// A whitespace-only value is deliberately *not* treated as unset here (that
+/// would silently substitute `sort` for a plainly-invalid setting); it is
+/// rejected explicitly once it's about to be used -- see the `is_empty()`
+/// check in `main` around `default_command.split_whitespace()`.
 fn default_command() -> String {
     match env::var("BODY_DEFAULT_COMMAND") {
-        Ok(value) if !value.trim().is_empty() => value,
+        Ok(value) if !value.is_empty() => value,
         _ => DEFAULT_COMMAND.to_string(),
     }
 }
@@ -64,21 +79,24 @@ fn print_help(default_command: &str) {
 
 /// Reads one line (without the trailing newline) directly from `file`,
 /// one byte at a time, so no bytes beyond the line itself are consumed
-/// from the underlying pipe. Returns `None` at EOF with nothing read.
-fn read_line_unbuffered(file: &mut File) -> Option<Vec<u8>> {
+/// from the underlying pipe. Returns `Ok(None)` at a clean EOF with nothing
+/// read, `Ok(Some(line))` for a full line or, at EOF, a partial/unterminated
+/// one, and `Err` for a genuine I/O error (distinct from EOF, which is not
+/// an error).
+fn read_line_unbuffered(file: &mut File) -> io::Result<Option<Vec<u8>>> {
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
     loop {
         match file.read(&mut byte) {
-            Ok(0) => return if line.is_empty() { None } else { Some(line) },
+            Ok(0) => return Ok(if line.is_empty() { None } else { Some(line) }),
             Ok(_) => {
                 if byte[0] == b'\n' {
-                    return Some(line);
+                    return Ok(Some(line));
                 }
                 line.push(byte[0]);
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(_) => return if line.is_empty() { None } else { Some(line) },
+            Err(e) => return Err(e),
         }
     }
 }
@@ -111,7 +129,27 @@ fn main() -> ExitCode {
 
     if let Some(first) = &pending_first {
         if is_whole_number(first) {
-            header_lines = first.parse().unwrap_or(DEFAULT_HEADER_LINES);
+            // Reject a header count that doesn't fit in a signed 64-bit
+            // integer -- the same bound bash/body.sh's `(( ))` arithmetic
+            // enforces (its arithmetic silently wraps around at this
+            // width) -- so out-of-range N is rejected the same way by both
+            // implementations instead of Rust quietly falling back to the
+            // default header count.
+            let count = first
+                .parse::<i64>()
+                .ok()
+                .and_then(|value| usize::try_from(value).ok());
+            match count {
+                Some(value) => header_lines = value,
+                None => {
+                    eprintln!(
+                        "body: N ('{}') is too large (must not exceed {})",
+                        first,
+                        i64::MAX
+                    );
+                    return ExitCode::FAILURE;
+                }
+            }
             pending_first = args.next();
         }
     }
@@ -119,6 +157,19 @@ fn main() -> ExitCode {
     let default_command = default_command();
     let command_args: Vec<String> = pending_first.into_iter().chain(args).collect();
     if command_args.is_empty() {
+        // `default_command()` only substitutes `sort` for an unset or
+        // exactly-empty BODY_DEFAULT_COMMAND; a whitespace-only value (e.g.
+        // " ") passes that check but word-splits to zero tokens. Reject it
+        // explicitly, before printing anything or touching STDIN, instead
+        // of silently falling back to `sort` (the old behavior here) or
+        // panicking later when `final_command` turns out to be empty.
+        if default_command.split_whitespace().next().is_none() {
+            eprintln!(
+                "body: BODY_DEFAULT_COMMAND ('{}') has no command after word-splitting",
+                default_command
+            );
+            return ExitCode::FAILURE;
+        }
         eprintln!("body: running {} by default", default_command);
     }
 
@@ -126,21 +177,31 @@ fn main() -> ExitCode {
     // it here does not take exclusive ownership away from anything else,
     // and `forget` below ensures it is never closed by this `File`'s Drop.
     let mut raw_stdin = unsafe { File::from_raw_fd(0) };
+    let mut read_error: Option<io::Error> = None;
     {
         let stdout = io::stdout();
         let mut out = stdout.lock();
         for _ in 0..header_lines {
             match read_line_unbuffered(&mut raw_stdin) {
-                Some(line) => {
+                Ok(Some(line)) => {
                     let _ = out.write_all(&line);
                     let _ = out.write_all(b"\n");
                 }
-                None => break,
+                Ok(None) => break,
+                Err(e) => {
+                    read_error = Some(e);
+                    break;
+                }
             }
         }
         let _ = out.flush();
     }
     forget(raw_stdin); // the child still needs fd 0 open
+
+    if let Some(e) = read_error {
+        eprintln!("body: error reading from stdin: {}", e);
+        return ExitCode::FAILURE;
+    }
 
     // BODY_DEFAULT_COMMAND may contain arguments (e.g. "sort -r"); split it
     // on whitespace the same way bash word-splits an unquoted variable.

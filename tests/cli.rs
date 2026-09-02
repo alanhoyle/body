@@ -136,3 +136,95 @@ fn unknown_command_exits_127_like_a_shell_would() {
         .assert()
         .code(127);
 }
+
+#[test]
+fn leading_zero_header_count_is_interpreted_as_decimal_not_octal() {
+    // "010" must mean ten header lines (decimal), not eight (octal) -- a
+    // divergence that used to exist between bash's `(( ))` arithmetic
+    // (octal) and Rust's decimal `parse`.
+    let assert = body()
+        .args(["010", "sort"])
+        .write_stdin("h01\nh02\nh03\nh04\nh05\nh06\nh07\nh08\nh09\nh10\ncharlie\nalpha\nbravo\n")
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        out,
+        "h01\nh02\nh03\nh04\nh05\nh06\nh07\nh08\nh09\nh10\nalpha\nbravo\ncharlie\n"
+    );
+}
+
+#[test]
+fn header_count_at_the_i64_boundary_is_accepted() {
+    // 9223372036854775807 (i64::MAX) is the largest value both
+    // implementations accept; anything larger is a hard error (see
+    // `header_count_that_overflows_is_rejected_with_a_clear_error`).
+    let assert = body()
+        .args(["9223372036854775807", "sort"])
+        .write_stdin("only-one\n")
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(out, "only-one\n");
+}
+
+#[test]
+fn header_count_that_overflows_is_rejected_with_a_clear_error() {
+    let assert = body()
+        .args(["99999999999999999999999999", "sort"])
+        .write_stdin("a\nb\n")
+        .assert()
+        .failure()
+        .code(1);
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("too large"));
+}
+
+#[test]
+fn unterminated_final_header_line_is_still_printed() {
+    // STDIN ends mid-line (no trailing newline) exactly where the header
+    // ends. bash's `read || break` used to silently drop this partial line
+    // instead of printing it; both sides must print it.
+    let assert = body()
+        .args(["1", "sort"])
+        .write_stdin("header")
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(out, "header\n");
+}
+
+#[test]
+fn body_default_command_that_is_only_whitespace_is_rejected_with_a_clear_error() {
+    // A whitespace-only BODY_DEFAULT_COMMAND word-splits to nothing usable.
+    // It must be rejected explicitly, not silently substituted with `sort`
+    // (the old behavior here) nor silently run as a no-op that discards the
+    // piped body (bash's old behavior).
+    let assert = body()
+        .env("BODY_DEFAULT_COMMAND", "   ")
+        .write_stdin("header\na\n")
+        .assert()
+        .failure()
+        .code(1);
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("has no command after word-splitting"));
+}
+
+#[test]
+fn a_genuine_stdin_read_error_is_reported_not_silently_treated_as_eof() {
+    // Redirecting STDIN from a directory makes the underlying read(2) fail
+    // with EISDIR instead of returning EOF, exercising the real I/O-error
+    // path (distinct from ordinary EOF, which is not an error).
+    use std::process::{Command, Stdio};
+    let dir = std::fs::File::open(".").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_body"))
+        .args(["1", "sort"])
+        .stdin(Stdio::from(dir))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("error reading from stdin"));
+}

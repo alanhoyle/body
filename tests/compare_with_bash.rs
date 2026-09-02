@@ -68,6 +68,36 @@ const CASES: &[Case] = &[
         stdin: "header\na\nc\nb\n",
         default_command_env: Some("sort -r"),
     },
+    Case {
+        name: "leading zero header count is decimal, not octal",
+        args: &["010", "sort"],
+        stdin: "h01\nh02\nh03\nh04\nh05\nh06\nh07\nh08\nh09\nh10\ncharlie\nalpha\nbravo\n",
+        default_command_env: None,
+    },
+    Case {
+        name: "header count at the i64 boundary is accepted",
+        args: &["9223372036854775807", "sort"],
+        stdin: "only-one\n",
+        default_command_env: None,
+    },
+    Case {
+        name: "header count overflow is rejected on both sides",
+        args: &["99999999999999999999999999", "sort"],
+        stdin: "a\nb\n",
+        default_command_env: None,
+    },
+    Case {
+        name: "unterminated final header line is still printed",
+        args: &["1", "sort"],
+        stdin: "header",
+        default_command_env: None,
+    },
+    Case {
+        name: "whitespace-only BODY_DEFAULT_COMMAND is rejected on both sides",
+        args: &[],
+        stdin: "header\na\n",
+        default_command_env: Some("   "),
+    },
 ];
 
 fn bash_body_sh_path() -> PathBuf {

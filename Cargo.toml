@@ -1,8 +1,13 @@
 [package]
 name = "body"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
-description = "Print header line(s) from STDIN untouched, then pipe the rest to another command."
+description = "Print header line(s) from STDIN untouched, then pipe the rest to another command. Unix only."
+license = "MIT"
+repository = "https://github.com/alanhoyle/body"
+readme = "README.md"
+keywords = ["cli", "header", "sort", "pipe"]
+categories = ["command-line-utilities", "os::unix-apis"]
 
 [[bin]]
 name = "body"

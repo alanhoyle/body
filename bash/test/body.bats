@@ -98,3 +98,82 @@ setup() {
     [ "${lines[2]}" = "b" ]
     [ "${lines[3]}" = "a" ]
 }
+
+@test "leading zero header count is interpreted as decimal, not octal (regression)" {
+    run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; printf "h01\nh02\nh03\nh04\nh05\nh06\nh07\nh08\nh09\nh10\ncharlie\nalpha\nbravo\n" | body 010 sort 2>/dev/null'
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 13 ]
+    [ "${lines[9]}" = "h10" ]
+    [ "${lines[10]}" = "alpha" ]
+    [ "${lines[11]}" = "bravo" ]
+    [ "${lines[12]}" = "charlie" ]
+}
+
+@test "header count at the i64 boundary is accepted" {
+    run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; printf "only-one\n" | body 9223372036854775807 sort 2>/dev/null'
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "only-one" ]
+}
+
+@test "header count that overflows i64 is rejected with a clear error, not silently ignored (regression)" {
+    run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; printf "a\nb\n" | body 99999999999999999999999999 sort 2>&1 1>/dev/null'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"too large"* ]]
+}
+
+@test "unterminated final header line is still printed, not silently dropped (regression)" {
+    # `read || break` used to discard the partial line `read` still
+    # populates on a no-trailing-newline EOF, since it happens before the
+    # printf that would emit it.
+    run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; printf "header" | body 1 sort 2>/dev/null'
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "header" ]
+}
+
+@test "whitespace-only BODY_DEFAULT_COMMAND is rejected with a clear error (regression)" {
+    run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; export BODY_DEFAULT_COMMAND="   "; printf "header\na\n" | body 2>&1 1>/dev/null'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"has no command after word-splitting"* ]]
+}
+
+# The function is documented (see body.sh's header comment) to also be
+# sourced into zsh, not just bash -- these mirror the regressions above
+# under zsh specifically, since bash and zsh differ subtly enough here
+# (read's array flag, and array element counts after splitting whitespace)
+# that a bash-only regression suite would miss a zsh-specific break.
+zsh_available() {
+    command -v zsh >/dev/null 2>&1
+}
+
+@test "[zsh] unterminated final header line is still printed (regression)" {
+    if ! zsh_available; then
+        skip "zsh not installed"
+    fi
+    run zsh -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; printf "header" | body 1 sort 2>/dev/null'
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "header" ]
+}
+
+@test "[zsh] whitespace-only BODY_DEFAULT_COMMAND is rejected with a clear error (regression)" {
+    if ! zsh_available; then
+        skip "zsh not installed"
+    fi
+    run zsh -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; export BODY_DEFAULT_COMMAND="   "; printf "header\na\n" | body 2>&1 1>/dev/null'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"has no command after word-splitting"* ]]
+}
+
+@test "[zsh] BODY_DEFAULT_COMMAND with arguments is word-split via read -A, not bash's read -a (regression)" {
+    if ! zsh_available; then
+        skip "zsh not installed"
+    fi
+    run zsh -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; export BODY_DEFAULT_COMMAND="sort -r"; printf "header\na\nc\nb\n" | body 2>/dev/null'
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "header" ]
+    [ "${lines[1]}" = "c" ]
+    [ "${lines[2]}" = "b" ]
+    [ "${lines[3]}" = "a" ]
+}
