@@ -23,9 +23,14 @@
 #   - Uses `$#` to detect whether a body-command was supplied instead of
 #     joining "$@" into a string and testing it for emptiness, which could
 #     mis-detect arguments that are empty or all-whitespace.
+#   - The default command (used when COMMAND_TO_PROCESS_BODY is omitted) can
+#     be overridden by setting the BODY_DEFAULT_COMMAND environment variable;
+#     it falls back to "sort" if unset or empty. It may include arguments
+#     (e.g. BODY_DEFAULT_COMMAND="sort -r"), which are word-split before
+#     running.
 body() {
     local HEADER_LINES=1
-    local DEFAULT_COMMAND="sort"
+    local DEFAULT_COMMAND="${BODY_DEFAULT_COMMAND:-sort}"
 
     if [[ -t 0 || "$1" == "-h" || "$1" == "--help" ]]; then
         if [ -t 0 ]; then
@@ -40,6 +45,7 @@ body() {
         echo "    if the first parameter N is a whole number (0 or more), it prints that many" >&2
         echo "        lines before proceeding  [ default: skip $HEADER_LINES ]" >&2
         echo "    if the [ COMMAND_TO_PROCESS_OUTPUT ] is omitted, '$DEFAULT_COMMAND' is used" >&2
+        echo "        (override via the BODY_DEFAULT_COMMAND environment variable)" >&2
         echo "" >&2
         echo "EXAMPLES:" >&2
         echo "    Sort a file, but maintain a one-line header:" >&2
@@ -74,7 +80,11 @@ body() {
     done
 
     if [ $# -eq 0 ]; then
-        "$DEFAULT_COMMAND"
+        # BODY_DEFAULT_COMMAND may contain arguments (e.g. "sort -r"), so it
+        # must be word-split rather than run as a single (quoted) command name.
+        local -a default_command_words
+        read -ra default_command_words <<< "$DEFAULT_COMMAND"
+        "${default_command_words[@]}"
     else
         "$@"
     fi

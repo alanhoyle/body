@@ -91,6 +91,44 @@ fn missing_command_falls_back_to_sort_and_announces_it_on_stderr() {
 }
 
 #[test]
+fn body_default_command_env_var_overrides_the_default() {
+    let assert = body()
+        .env("BODY_DEFAULT_COMMAND", "rev")
+        .write_stdin("header\nabc\n")
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert_eq!(out, "header\ncba\n");
+    assert!(stderr.contains("running rev by default"));
+}
+
+#[test]
+fn body_default_command_env_var_with_arguments_is_word_split() {
+    // Regression test: BODY_DEFAULT_COMMAND="sort -r" must run `sort -r`,
+    // not fail looking for a single binary literally named "sort -r".
+    let assert = body()
+        .env("BODY_DEFAULT_COMMAND", "sort -r")
+        .write_stdin("header\na\nc\nb\n")
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(out, "header\nc\nb\na\n");
+}
+
+#[test]
+fn body_default_command_env_var_is_ignored_when_a_command_is_given() {
+    let assert = body()
+        .env("BODY_DEFAULT_COMMAND", "rev")
+        .args(["1", "sort"])
+        .write_stdin("header\nc\na\nb\n")
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(out, "header\na\nb\nc\n");
+}
+
+#[test]
 fn unknown_command_exits_127_like_a_shell_would() {
     body()
         .args(["1", "totally_not_a_real_command"])

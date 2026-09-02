@@ -56,6 +56,13 @@ COMMAND | body [-h|--help] [N] [COMMAND_TO_PROCESS_BODY [ARGS...]]
 - `COMMAND_TO_PROCESS_BODY` — the command the remaining lines are piped to
   (default: `sort`). Any arguments after it are passed along.
 
+The default command (used when `COMMAND_TO_PROCESS_BODY` is omitted) can be
+changed by setting the `BODY_DEFAULT_COMMAND` environment variable, e.g.:
+
+```bash
+BODY_DEFAULT_COMMAND="sort -r" body <<< $'header\na\nc\nb'
+```
+
 ### Examples
 
 Sort a file, keeping a one-line header in place:

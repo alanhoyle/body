@@ -10,6 +10,7 @@ struct Case {
     name: &'static str,
     args: &'static [&'static str],
     stdin: &'static str,
+    default_command_env: Option<&'static str>,
 }
 
 const CASES: &[Case] = &[
@@ -17,36 +18,55 @@ const CASES: &[Case] = &[
         name: "default 1-line header, sort",
         args: &[],
         stdin: "header\nc\na\nb\n",
+        default_command_env: None,
     },
     Case {
         name: "2-line header, sort -r",
         args: &["2", "sort", "-r"],
         stdin: "h1\nh2\nc\na\nb\n",
+        default_command_env: None,
     },
     Case {
         name: "0 header lines, sort",
         args: &["0", "sort"],
         stdin: "c\na\nb\n",
+        default_command_env: None,
     },
     Case {
         name: "0 header lines, wc -l",
         args: &["0", "wc", "-l"],
         stdin: "one\ntwo\nthree\n",
+        default_command_env: None,
     },
     Case {
         name: "header count exceeds input length",
         args: &["5", "sort"],
         stdin: "only-one\n",
+        default_command_env: None,
     },
     Case {
         name: "grep -v with a preserved header",
         args: &["1", "grep", "-v", "banana"],
         stdin: "header\nbanana\napple\ncherry\n",
+        default_command_env: None,
     },
     Case {
         name: "no trailing newline on last line",
         args: &["1", "sort"],
         stdin: "header\nc\na\nb",
+        default_command_env: None,
+    },
+    Case {
+        name: "BODY_DEFAULT_COMMAND overrides the default command",
+        args: &[],
+        stdin: "header\nabc\n",
+        default_command_env: Some("rev"),
+    },
+    Case {
+        name: "BODY_DEFAULT_COMMAND with arguments is word-split",
+        args: &[],
+        stdin: "header\na\nc\nb\n",
+        default_command_env: Some("sort -r"),
     },
 ];
 
@@ -60,12 +80,17 @@ fn run_bash(case: &Case) -> (String, i32) {
         bash_body_sh_path().display(),
         case.args.join(" ")
     );
-    let output = Command::new("bash")
+    let mut command = Command::new("bash");
+    command
         .arg("-c")
         .arg(script)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(value) = case.default_command_env {
+        command.env("BODY_DEFAULT_COMMAND", value);
+    }
+    let output = command
         .spawn()
         .and_then(|mut child| {
             use std::io::Write;
@@ -84,11 +109,12 @@ fn run_bash(case: &Case) -> (String, i32) {
 }
 
 fn run_rust(case: &Case) -> (String, i32) {
-    let assert = AssertCommand::cargo_bin("body")
-        .unwrap()
-        .args(case.args)
-        .write_stdin(case.stdin)
-        .assert();
+    let mut command = AssertCommand::cargo_bin("body").unwrap();
+    command.args(case.args);
+    if let Some(value) = case.default_command_env {
+        command.env("BODY_DEFAULT_COMMAND", value);
+    }
+    let assert = command.write_stdin(case.stdin).assert();
     let output = assert.get_output();
     (
         String::from_utf8(output.stdout.clone()).unwrap(),

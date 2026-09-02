@@ -73,3 +73,28 @@ setup() {
     run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; printf "header\nb\na\n" | body 2>&1 1>/dev/null'
     [[ "$output" == *"running sort by default"* ]]
 }
+
+@test "BODY_DEFAULT_COMMAND is announced and used when no command is given" {
+    run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; export BODY_DEFAULT_COMMAND="rev"; printf "header\nabc\n" | body 2>&1'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"running rev by default"* ]]
+    [[ "$output" == *"cba"* ]]
+}
+
+@test "BODY_DEFAULT_COMMAND is ignored when a command is given explicitly" {
+    run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; export BODY_DEFAULT_COMMAND="rev"; printf "header\nc\na\nb\n" | body 1 sort'
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "header" ]
+    [ "${lines[1]}" = "a" ]
+    [ "${lines[2]}" = "b" ]
+    [ "${lines[3]}" = "c" ]
+}
+
+@test "BODY_DEFAULT_COMMAND with arguments is word-split, not run as one command name" {
+    run bash -c 'source "'"${BATS_TEST_DIRNAME}"'/../body.sh"; export BODY_DEFAULT_COMMAND="sort -r"; printf "header\na\nc\nb\n" | body 2>/dev/null'
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "header" ]
+    [ "${lines[1]}" = "c" ]
+    [ "${lines[2]}" = "b" ]
+    [ "${lines[3]}" = "a" ]
+}

@@ -27,7 +27,17 @@ use std::process::{Command, ExitCode, Stdio};
 const DEFAULT_COMMAND: &str = "sort";
 const DEFAULT_HEADER_LINES: usize = 1;
 
-fn print_help() {
+/// Default command to hand the body to when none is given on the command
+/// line. Overridable via the `BODY_DEFAULT_COMMAND` environment variable,
+/// falling back to `sort` if unset or empty (matching bash's `${VAR:-default}`).
+fn default_command() -> String {
+    match env::var("BODY_DEFAULT_COMMAND") {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => DEFAULT_COMMAND.to_string(),
+    }
+}
+
+fn print_help(default_command: &str) {
     eprintln!("body: prints the header from a STDIN and sends the 'body' to another command for");
     eprintln!("    additional processing.  Useful for sort/grep when you want to keep headers.");
     eprintln!();
@@ -39,8 +49,9 @@ fn print_help() {
     );
     eprintln!(
         "    if the [ COMMAND_TO_PROCESS_OUTPUT ] is omitted, '{}' is used",
-        DEFAULT_COMMAND
+        default_command
     );
+    eprintln!("        (override via the BODY_DEFAULT_COMMAND environment variable)");
     eprintln!();
     eprintln!("EXAMPLES:");
     eprintln!("    Sort a file, but maintain a one-line header:");
@@ -86,7 +97,7 @@ fn main() -> ExitCode {
             eprintln!("ERROR:  body requires piped input!");
             eprintln!();
         }
-        print_help();
+        print_help(&default_command());
         return if stdin_is_tty {
             ExitCode::FAILURE
         } else {
@@ -105,9 +116,10 @@ fn main() -> ExitCode {
         }
     }
 
+    let default_command = default_command();
     let command_args: Vec<String> = pending_first.into_iter().chain(args).collect();
     if command_args.is_empty() {
-        eprintln!("body: running {} by default", DEFAULT_COMMAND);
+        eprintln!("body: running {} by default", default_command);
     }
 
     // SAFETY: fd 0 (stdin) is open for the lifetime of the process; wrapping
@@ -130,10 +142,20 @@ fn main() -> ExitCode {
     }
     forget(raw_stdin); // the child still needs fd 0 open
 
-    let (program, prog_args) = match command_args.split_first() {
-        Some((program, rest)) => (program.as_str(), rest),
-        None => (DEFAULT_COMMAND, &[][..]),
+    // BODY_DEFAULT_COMMAND may contain arguments (e.g. "sort -r"); split it
+    // on whitespace the same way bash word-splits an unquoted variable.
+    let final_command: Vec<String> = if command_args.is_empty() {
+        default_command
+            .split_whitespace()
+            .map(String::from)
+            .collect()
+    } else {
+        command_args
     };
+    let (program, prog_args) = final_command
+        .split_first()
+        .map(|(program, rest)| (program.as_str(), rest))
+        .expect("BODY_DEFAULT_COMMAND is never empty or all-whitespace");
 
     let status = Command::new(program)
         .args(prog_args)
